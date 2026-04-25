@@ -241,13 +241,55 @@ export default function App() {
   const [wantFaceup, setWantFaceup] = useState(false);
   const unsubRef = useRef(null);
 
+  // Firebase stores arrays as objects when they contain objects — normalize them back
+  function normalizeRoom(raw) {
+    if (!raw) return raw;
+    const r = { ...raw };
+    // Normalize players array
+    if (r.players && !Array.isArray(r.players)) r.players = Object.values(r.players);
+    // Normalize campaign arrays
+    if (r.campaign) {
+      if (r.campaign.completed && !Array.isArray(r.campaign.completed)) r.campaign = { ...r.campaign, completed: Object.values(r.campaign.completed) };
+      if (r.campaign.regrets && !Array.isArray(r.campaign.regrets)) r.campaign = { ...r.campaign, regrets: Object.values(r.campaign.regrets) };
+      if (!r.campaign.completed) r.campaign = { ...r.campaign, completed: [] };
+      if (!r.campaign.regrets) r.campaign = { ...r.campaign, regrets: [] };
+    }
+    // Normalize test
+    if (r.test) {
+      if (r.test.hands && !Array.isArray(r.test.hands)) r.test = { ...r.test, hands: Object.values(r.test.hands) };
+      if (r.test.hands) {
+        r.test = {
+          ...r.test,
+          hands: r.test.hands.map(h => ({
+            ...h,
+            main: h.main ? (Array.isArray(h.main) ? h.main : Object.values(h.main)) : [],
+            bonus: h.bonus ? (Array.isArray(h.bonus) ? h.bonus : Object.values(h.bonus)) : [],
+            played: h.played ? (Array.isArray(h.played) ? h.played : Object.values(h.played)) : [],
+          }))
+        };
+      }
+      if (r.test.placements && !Array.isArray(r.test.placements)) r.test = { ...r.test, placements: Object.values(r.test.placements) };
+      if (r.test.placements) {
+        r.test = {
+          ...r.test,
+          placements: r.test.placements.map(seg =>
+            seg ? (Array.isArray(seg) ? seg : Object.values(seg)) : []
+          )
+        };
+      }
+      if (r.test.placementLog && !Array.isArray(r.test.placementLog)) r.test = { ...r.test, placementLog: Object.values(r.test.placementLog) };
+      if (!r.test.placementLog) r.test = { ...r.test, placementLog: [] };
+    }
+    return r;
+  }
+
   // Subscribe to room updates from Firebase
   function subscribeRoom(code) {
     if (unsubRef.current) off(unsubRef.current);
     const roomRef = ref(db, `rooms/${code}`);
     unsubRef.current = roomRef;
     onValue(roomRef, (snap) => {
-      if (snap.exists()) setRoom(snap.val());
+      if (snap.exists()) setRoom(normalizeRoom(snap.val()));
     });
   }
 
@@ -255,11 +297,16 @@ export default function App() {
     return () => { if (unsubRef.current) off(unsubRef.current); };
   }, []);
 
-  // Keep activeClock in sync when room.test changes
+  // Sync screen when Firebase room phase changes (for non-host players)
   useEffect(() => {
-    if (!room || !activeClock) return;
+    if (!room) return;
+    if (room.phase === "campaign" && (screen === "waiting" || screen === "lobby")) {
+      setScreen("campaign");
+    }
     if (room.phase === "campaign" && screen === "test") {
-      // test resolved by host
+      // Host resolved a test — go back to campaign map
+      setScreen("campaign");
+      setActiveClock(null);
     }
   }, [room?.phase]);
 
