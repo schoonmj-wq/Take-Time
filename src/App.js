@@ -402,40 +402,57 @@ export default function App() {
   // ── PLACE CARD ──
   async function placeCard(segIdx) {
     if (!selectedCard || !room?.test) return;
-    const hand = room.test.hands[myIdx];
+
+    // Re-normalize everything from room state — Firebase can return objects instead of arrays
+    const toArr = (x) => !x ? [] : Array.isArray(x) ? x : Object.values(x);
+
+    const hands = toArr(room.test.hands).map(h => ({
+      ...h,
+      main: toArr(h.main),
+      bonus: toArr(h.bonus),
+      played: toArr(h.played),
+    }));
+    const placements = toArr(room.test.placements).map(s => toArr(s));
+    const placementLog = toArr(room.test.placementLog);
+    const players = toArr(room.players);
+
+    const hand = hands[myIdx];
+    if (!hand) return;
+
     const cardInMain = hand.main.find(c => c.id === selectedCard.id);
-    const cardInBonus = hand.bonus?.find(c => c.id === selectedCard.id);
+    const cardInBonus = hand.bonus.find(c => c.id === selectedCard.id);
     const card = cardInMain || cardInBonus;
     if (!card || hand.played.includes(card.id)) return;
 
     const newPlayed = [...hand.played, card.id];
     let newMain = cardInMain ? hand.main.filter(c => c.id !== card.id) : hand.main;
-    let newBonus = cardInBonus ? (hand.bonus || []).filter(c => c.id !== card.id) : (hand.bonus || []);
+    let newBonus = cardInBonus ? hand.bonus.filter(c => c.id !== card.id) : hand.bonus;
 
-    // 2-player: reveal bonus after 2 placed
-    if (room.players.length === 2 && newPlayed.length === 2 && newBonus.length > 0 && cardInMain) {
+    // 2-player: reveal bonus cards after 2 placed
+    if (players.length === 2 && newPlayed.length === 2 && newBonus.length > 0 && cardInMain) {
       newMain = [...newMain, ...newBonus];
       newBonus = [];
     }
 
-    const newHands = room.test.hands.map((h, i) =>
+    const newHands = hands.map((h, i) =>
       i === myIdx ? { ...h, main: newMain, bonus: newBonus, played: newPlayed } : h
     );
-    const newPlacements = room.test.placements.map((s, i) =>
+    const newPlacements = placements.map((s, i) =>
       i === segIdx ? [...s, { ...card, faceup: wantFaceup }] : s
     );
-    const faceupUsed = room.test.faceupUsed + (wantFaceup ? 1 : 0);
-    const newLog = [...(room.test.placementLog || []), {
-      player: room.players[myIdx].name,
+    const faceupUsed = (room.test.faceupUsed || 0) + (wantFaceup ? 1 : 0);
+    const newLog = [...placementLog, {
+      player: players[myIdx].name,
       cardVal: card.value, cardType: card.type,
       segLabel: clock.segments[segIdx].label,
       faceup: wantFaceup
     }];
 
-    const allDone = newHands.every(h => h.main.length === 0 && (h.bonus || []).length === 0);
+    const allDone = newHands.every(h => h.main.length === 0 && h.bonus.length === 0);
 
     await saveRoom({
       ...room,
+      players,
       test: {
         ...room.test,
         hands: newHands, placements: newPlacements,
